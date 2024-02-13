@@ -1,6 +1,8 @@
 # medical_llm
 Large Language Model for Biomedical
 
+This repository uses MIMIC4 dataset to generate prompts that later will be used to train an LLM
+
 
 # 1. data_generation.py 
 

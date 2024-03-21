@@ -1,34 +1,53 @@
-# medical_llm
-Large Language Model for Biomedical
+# Fine-tuning Mistral 7B on MIMIC4 Biomedical Data with Single GPU and QLoRA
 
-This repository uses MIMIC4 dataset to generate prompts that later will be used to train an LLM
+This guide outlines the steps to specialize any language model for a particular task easily. With Modal, streamline your training process in the cloud, avoiding the hassle of managing infrastructure, such as building images and configuring GPUs.
+
+We demonstrate training [Mistral 7B](https://huggingface.co/mistralai/Mistral-7B-v0.1) on a single GPU via [QLoRA](https://github.com/artidoro/qlora), a fine-tuning method that merges quantization with LoRA to efficiently reduce memory consumption while maintaining performance. Our model undergoes 4-bit quantization and is trained on [MIMIC4 biomedical data](https://physionet.org/content/mimiciii/), adapting it for healthcare applications. Modal facilitates the process with its [GPU-accelerated setup](https://modal.com/docs/guide/gpu) and [integrated storage solution](https://modal.com/docs/guide/volumes), allowing for quick training initiation.
+
+Customizing this setup for various needs is straightforward:
+- Change the `BASE_MODEL` in `common.py` to fine-tune a different language model.
+- For personal training data (stored as local .csv or .jsonl files), upload your datasets to modal.Volume with `modal volume put training-data-vol /local_path/to/dataset /training_data`, adjusting prompt templates to suit your data.
+- Adjust or remove quantization by modifying `BitsandBytesConfig` in `train.py`, ensuring to replicate changes in `inference.py`.
+
+## Before Starting - Modal Account Setup
+1. Sign up at [modal.com](https://modal.com/).
+2. Install the `modal` package in your Python virtual environment with `pip install modal`.
+3. Configure a Modal token in your environment via `python3 -m modal setup`.
+4. To monitor training with Weights and Biases, create a [secret](https://modal.com/secrets) named `my-wandb-secret` in Modal, requiring only the `WANDB_API_KEY` from your Weights and Biases account's [Authorize page](https://wandb.ai/authorize).
+
+## Training
+Initiate training with:
+```shell
+modal run train.py
+
+```
+
+Options:
+- `--detach`: keeps the app running if your local process ends or disconnects.
+```modal run --detach train.py```
+- `--run_id`: assign a custom ID to track training sessions.
+```modal run train.py --run_id <run_id>```
+- `--resume-from-checkpoint`: continue training from a specific saved checkpoint.
+```modal run train.py --resume-from-checkpoint /results/<checkpoint-number>```
+
+Verify that adapter weights are saved in your results volume:
+```modal volume ls results-vol```
+
+## Inference
+Test your model post-fine-tuning with:
+```modal run inference.py --run_id <run_id>```
 
 
-# 1. data_generation.py 
-
-this is a simplified example, and you might need to customize the `extract_patient_data()` function based on the structure of your dataset and the type of questions you want to generate. You can expand the `generate_question()` function to create more diverse questions based on different aspects of the patient's data, such as symptoms, treatments, or lab results.
-
-**For simplicity, let's generate a question related to the primary diagnosis:**
+## Next Steps
+- Deploy your model's inference function via a Modal [web endpoint](https://modal.com/docs/guide/webhooks). Modal's serverless scaling means no cost for maintaining an endpoint. For implementation examples, see the [QuiLLMan](https://github.com/modal-labs/quillman/) repository, which features a FastAPI server setup (`quillman/src/app.py`).
+- Consider fine-tuning additional models. For models exceeding single-GPU capacity, our [Llama finetuning repository](https://github.com/modal-labs/llama-finetuning/) offers FSDP for optimized multi-GPU scaling.
 
 
-# 2. data_generation2.py
+## Fine-tuning Tips and Observations
 
-* To diversify questions and context, you can create a list of question templates and select different aspects of the patient's data to generate questions.
-
-This approach will generate a diverse set of questions related to different aspects of the patient's data, such as symptoms, treatments, lab results, and medical history. You can add more question templates to the question_templates list or customize the existing templates to create even more diverse questions.
-
-
-* To pair these questions with relevant contexts and extract their corresponding answers (ground truths), you can modify the `generate_question` function to return both the question and the answer. 
-
-This approach will generate diverse question-context pairs with corresponding answers (ground truths) based on different aspects of the patient's data. You can further customize the `generate_question` function and add more question templates to create even more diverse questions and answers.
-
-* To ensure that the answer corresponds to the randomly generated question, you need to carefully construct the question templates and map them to the correct keys in the patient data dictionary. In the example provided earlier, the question_templates list contains tuples with the question template and the corresponding key in the patient data dictionary.
-
-When constructing the `patient_data` dictionary in the `extract_patient_data()` function, make sure to include all the relevant keys that you want to use in your question templates.
-
-
-# 3. data_generation3.py
-
-To generate `n` pairs of question-answers with deterministic randomness depending on the availability of data for each patient.
-
-This approach will generate `n` pairs of question-answers for each patient with deterministic randomness based on the availability of data. The randomness is deterministic by using a seed value in the `generate_question` function. In this example, the seed value is set to the row index (index) from the dataset, but you can choose any other suitable seed value
+- **Learning Rate Adjustment**: When operating with smaller batch sizes, consider reducing the learning rate to maintain training stability.
+- **Grad Clip and Weight Decay**: In my experience, adjustments to gradient clipping and weight decay weren't necessary, but your mileage may vary (YMMV). It's worth experimenting to see what works best for your specific setup.
+- **Data Volume**: Ensuring a sufficient amount of data is critical. I recommend using more than 1,000 samples for effective training.
+- **Epochs and Sample Size**: My training involved 3 epochs over 40,000 samples. The model showed signs of improvement, indicating the need for further experimentation with the number of epochs to optimize performance.
+- **Evaluating Model Performance**: To accurately gauge whether your model is improving, overfitting, or deteriorating, incorporate evaluation phases using data not included in the training set. For tasks like code completion, consider evaluating on the MBPP validation set or any other custom dataset you've prepared.
+- **Fully Sharded Data Parallelism (FSDP) Options**: If your setup allows, use `backward_prefetch=BackwardPrefetch.BACKWARD_PRE` to leverage GPU memory more efficiently. Alternatively, `backward_prefetch=BackwardPrefetch.BACKWARD_POST` might be an option. Note that setting this to `None` was necessary to avoid out-of-memory (OOM) errors.
